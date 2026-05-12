@@ -1,0 +1,11 @@
+build/
+bin/
+*.o
+*.out
+*.exe
+*.dSYM/
+*.csv.tmp
+.DS_Store
+.cache/
+.vscode/
+
