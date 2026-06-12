@@ -2,7 +2,7 @@
 
 > A from-scratch CUDA C++ inference demo implementing INT8 quantization, tiled matrix multiplication, numerically stable softmax, and an end-to-end two-layer neural network forward pass.
 
-This repository is designed as a portfolio project for showing practical GPU programming skills below the abstraction layer of PyTorch, TensorFlow, or TensorRT. It includes a CPU reference implementation, CUDA kernels, and a command-line inference runner.
+Everything below the matrix-multiply level is hand-written: quantization, INT8 matmul (naive and tiled), dequantization, activation, and softmax all run as custom CUDA kernels, with no PyTorch, TensorFlow, or TensorRT in the loop. A CPU reference implementation provides ground truth, and the command-line runner compares CPU and GPU outputs on every run.
 
 ## What It Builds
 
@@ -22,6 +22,14 @@ Input FP32
 ```
 
 All intermediate tensors stay on the GPU during inference.
+
+## Design Highlights
+
+- INT8 data movement with per-tensor symmetric quantization and a fixed zero-point of `0`
+- INT32 accumulation with quantized bias fused directly into the matmul accumulator
+- a shared-memory tiled matmul kernel benchmarked against a naive baseline (see [Benchmarks](#benchmarks))
+- numerically stable softmax via row-max subtraction before exponentiation
+- a CPU reference implementation used to validate every GPU run
 
 ## Repository Layout
 
@@ -245,18 +253,11 @@ uint64 element_count
 float32[element_count] values
 ```
 
-## Why This Project Matters
+## Possible Extensions
 
-This project demonstrates the core mechanics behind production inference systems:
-
-- quantized INT8 data movement
-- INT32 accumulator precision
-- fused bias handling
-- shared-memory tiling
-- numerically stable output normalization
-- CPU correctness checking against the GPU result
-
-The next natural extensions are per-channel weight quantization, Tensor Core paths using DP4A or WMMA-style APIs, and Nsight Compute profiling screenshots.
+- per-channel weight quantization
+- Tensor Core matmul paths using DP4A or WMMA-style APIs
+- Nsight Compute profiling
 
 ## Further Reading
 
