@@ -93,3 +93,20 @@ The current implementation intentionally favors readability over peak performanc
 - softmax uses one block per row, which is suitable for small class counts
 
 Those limitations make good future portfolio extensions because they are easy to explain and improve incrementally.
+
+## Naive vs. Tiled Performance Crossover
+
+Benchmarking on an NVIDIA T4 (see [README benchmarks](../README.md#benchmarks)) shows that
+`int8_matmul_tiled` is not strictly faster than `int8_matmul_naive` for this model's default
+dimensions:
+
+- At `batch = 32` (layer1: 32x128x784, layer2: 32x10x128), the tiled kernel is ~15% *slower*
+  than the naive kernel.
+- At `batch = 4096`, the tiled kernel is ~2-21% *faster*.
+
+The weight matrices here (≤400 KB) fit comfortably in the T4's L2 cache, so the naive
+kernel's repeated global-memory reads are largely served from cache, and shared-memory
+tiling adds `__syncthreads()` overhead without a corresponding bandwidth win. The tiling
+advantage only materializes once the working set is large enough that L2 caching alone
+can't cover the re-reads. This is a useful reminder that "tiled" is not synonymous with
+"faster" — it depends on whether the kernel is memory-bound at the given problem size.

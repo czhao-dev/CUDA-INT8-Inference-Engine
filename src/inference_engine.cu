@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -208,6 +209,71 @@ void forward_once(
     launch_argmax_reduce(probabilities->get(), predictions->get(), dims.batch, dims.output_dim, stream);
 }
 
+double time_matmul(
+    void (*launch)(const std::int8_t*, const std::int8_t*, const int*, int*, int, int, int, int, int, cudaStream_t),
+    const DeviceBuffer<std::int8_t>& a,
+    const DeviceBuffer<std::int8_t>& b,
+    const DeviceBuffer<int>& bias,
+    DeviceBuffer<int>* c,
+    int m,
+    int n,
+    int k,
+    int iterations) {
+    cudaEvent_t start;
+    cudaEvent_t stop;
+    CUDA_CHECK(cudaEventCreate(&start));
+    CUDA_CHECK(cudaEventCreate(&stop));
+
+    launch(a.get(), b.get(), bias.get(), c->get(), m, n, k, 0, 0, nullptr);
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    CUDA_CHECK(cudaEventRecord(start));
+    for (int i = 0; i < iterations; ++i) {
+        launch(a.get(), b.get(), bias.get(), c->get(), m, n, k, 0, 0, nullptr);
+    }
+    CUDA_CHECK(cudaEventRecord(stop));
+    CUDA_CHECK(cudaEventSynchronize(stop));
+
+    float elapsed_ms = 0.0f;
+    CUDA_CHECK(cudaEventElapsedTime(&elapsed_ms, start, stop));
+    CUDA_CHECK(cudaEventDestroy(start));
+    CUDA_CHECK(cudaEventDestroy(stop));
+    return static_cast<double>(elapsed_ms) / iterations;
+}
+
+MatmulBenchmark benchmark_matmul(const std::string& label, int m, int n, int k, int iterations) {
+    std::mt19937 rng(123);
+    std::uniform_int_distribution<int> int8_dist(-100, 100);
+
+    std::vector<std::int8_t> a_host(static_cast<std::size_t>(m) * k);
+    std::vector<std::int8_t> b_host(static_cast<std::size_t>(k) * n);
+    std::vector<int> bias_host(n, 0);
+    for (std::int8_t& value : a_host) {
+        value = static_cast<std::int8_t>(int8_dist(rng));
+    }
+    for (std::int8_t& value : b_host) {
+        value = static_cast<std::int8_t>(int8_dist(rng));
+    }
+
+    DeviceBuffer<std::int8_t> d_a(a_host.size());
+    DeviceBuffer<std::int8_t> d_b(b_host.size());
+    DeviceBuffer<int> d_bias(bias_host.size());
+    DeviceBuffer<int> d_c(static_cast<std::size_t>(m) * n);
+
+    CUDA_CHECK(cudaMemcpy(d_a.get(), a_host.data(), a_host.size() * sizeof(std::int8_t), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_b.get(), b_host.data(), b_host.size() * sizeof(std::int8_t), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_bias.get(), bias_host.data(), bias_host.size() * sizeof(int), cudaMemcpyHostToDevice));
+
+    MatmulBenchmark result;
+    result.label = label;
+    result.m = m;
+    result.n = n;
+    result.k = k;
+    result.naive_ms = time_matmul(launch_int8_matmul_naive, d_a, d_b, d_bias, &d_c, m, n, k, iterations);
+    result.tiled_ms = time_matmul(launch_int8_matmul_tiled, d_a, d_b, d_bias, &d_c, m, n, k, iterations);
+    return result;
+}
+
 }  // namespace
 
 const char* matmul_mode_name(GpuMatmulMode mode) {
@@ -301,6 +367,13 @@ GpuRunResult run_gpu_inference(
 
     cudaStreamDestroy(stream);
     return result;
+}
+
+std::vector<MatmulBenchmark> run_matmul_benchmarks(const NetworkDims& dims, int iterations) {
+    std::vector<MatmulBenchmark> results;
+    results.push_back(benchmark_matmul("layer1", dims.batch, dims.hidden_dim, dims.input_dim, iterations));
+    results.push_back(benchmark_matmul("layer2", dims.batch, dims.output_dim, dims.hidden_dim, iterations));
+    return results;
 }
 
 }  // namespace nn

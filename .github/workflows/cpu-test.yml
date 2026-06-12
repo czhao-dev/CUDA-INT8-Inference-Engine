@@ -1,0 +1,17 @@
+name: CPU reference test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  cpu-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build CPU reference test
+        run: make cpu-test
+
+      - name: Run CPU reference test
+        run: ./build/cpu_reference_test

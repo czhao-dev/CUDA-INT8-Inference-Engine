@@ -8,7 +8,7 @@ NVCCFLAGS ?= -O3 -std=c++17 -arch=$(ARCH) -Iinclude
 CPU_SRCS := src/cpu_reference.cpp
 CUDA_SRCS := src/quantize.cu src/matmul.cu src/activation.cu src/inference_engine.cu
 
-.PHONY: all cpu-test inference clean
+.PHONY: all cpu-test inference gpu-test clean
 
 all: cpu-test inference
 
@@ -20,6 +20,9 @@ cpu-test: $(BUILD_DIR)
 
 inference: $(BUILD_DIR)
 	$(NVCC) $(NVCCFLAGS) $(CUDA_SRCS) src/main.cu src/cpu_reference.cpp -o $(BUILD_DIR)/inference
+
+gpu-test: $(BUILD_DIR)
+	$(NVCC) $(NVCCFLAGS) $(CUDA_SRCS) tests/test_gpu_kernels.cu -o $(BUILD_DIR)/gpu_kernel_test
 
 clean:
 	rm -rf $(BUILD_DIR)

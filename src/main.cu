@@ -11,7 +11,8 @@ namespace {
 
 void print_usage(const char* executable) {
     std::cerr
-        << "Usage: " << executable << " [--batch N] [--input path] [--weights path] [--mode naive|tiled]\n"
+        << "Usage: " << executable
+        << " [--batch N] [--input path] [--weights path] [--mode naive|tiled] [--benchmark] [--benchmark-iters N]\n"
         << "When files are omitted, deterministic synthetic data is used.\n";
 }
 
@@ -33,6 +34,8 @@ int main(int argc, char** argv) {
     std::string weights_path;
     nn::GpuRunOptions options;
     bool batch_set = false;
+    bool benchmark = false;
+    int benchmark_iters = 50;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -54,6 +57,13 @@ int main(int argc, char** argv) {
                 options.mode = nn::GpuMatmulMode::Tiled;
             } else {
                 print_usage(argv[0]);
+                return 2;
+            }
+        } else if (arg == "--benchmark") {
+            benchmark = true;
+        } else if (arg == "--benchmark-iters" && i + 1 < argc) {
+            if (!parse_positive_int(argv[++i], &benchmark_iters)) {
+                std::cerr << "--benchmark-iters must be a positive integer\n";
                 return 2;
             }
         } else if (arg == "--help") {
@@ -108,6 +118,16 @@ int main(int argc, char** argv) {
                   << nn::mean_abs_error(cpu_result.probabilities, gpu_result.output.probabilities) << '\n'
                   << "First prediction: CPU=" << cpu_result.predictions.front()
                   << " GPU=" << gpu_result.output.predictions.front() << '\n';
+
+        if (benchmark) {
+            std::cout << "\nMatmul benchmark (avg of " << benchmark_iters << " iterations):\n";
+            for (const nn::MatmulBenchmark& result : nn::run_matmul_benchmarks(model.dims, benchmark_iters)) {
+                const double speedup = result.naive_ms / result.tiled_ms;
+                std::cout << "  " << result.label << " (m=" << result.m << ", n=" << result.n
+                          << ", k=" << result.k << "): naive=" << result.naive_ms
+                          << " ms tiled=" << result.tiled_ms << " ms speedup=" << speedup << "x\n";
+            }
+        }
     } catch (const std::exception& ex) {
         std::cerr << ex.what() << '\n';
         return 1;

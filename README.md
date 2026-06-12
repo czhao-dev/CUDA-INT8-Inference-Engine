@@ -141,6 +141,82 @@ Run inference with generated files:
 ./build/inference --input models/sample_input.bin --weights models/weights.bin --mode tiled
 ```
 
+## Testing & Benchmarks
+
+### CPU Reference Test
+
+Runs without a GPU and checks the binary I/O round trip plus the math invariants of the
+forward pass (probabilities sum to 1, predictions are in range, mismatched shapes throw):
+
+```bash
+make cpu-test
+./build/cpu_reference_test
+```
+
+This is also run automatically on every push via [GitHub Actions](.github/workflows/cpu-test.yml).
+
+### GPU Kernel Test
+
+Requires `nvcc` and a CUDA-capable GPU. Checks each kernel in isolation:
+
+- `int8_matmul_naive` and `int8_matmul_tiled` produce identical results, including on
+  matrix dimensions that aren't multiples of the 16x16 tile size.
+- `quantize_fp32_to_int8` → `dequantize_int32_to_fp32` round-trips within one quantization
+  step.
+- `relu_inplace` matches `max(x, 0)`.
+- `softmax_stable` and `argmax_reduce` match a CPU reference implementation.
+
+```bash
+make gpu-test
+./build/gpu_kernel_test
+```
+
+Or with CMake:
+
+```bash
+cmake -S . -B build/cmake -DCMAKE_CUDA_ARCHITECTURES=86
+cmake --build build/cmake
+./build/cmake/gpu_kernel_test
+```
+
+### Benchmarks
+
+The `inference` binary can time `int8_matmul_naive` against `int8_matmul_tiled` for each
+layer's dimensions using CUDA events:
+
+```bash
+./build/inference --benchmark --benchmark-iters 100
+```
+
+This prints the average kernel time and the tiled-vs-naive speedup for both layers, in
+addition to the usual correctness comparison against the CPU reference.
+
+#### Sample Results (NVIDIA T4, CUDA 12.9)
+
+```text
+$ ./build/inference --batch 32 --mode tiled --benchmark --benchmark-iters 100
+Mode: tiled
+Batch: 32
+Max probability error: 0.00582121
+Mean probability error: 0.00103727
+First prediction: CPU=7 GPU=7
+
+Matmul benchmark (avg of 100 iterations):
+  layer1 (m=32, n=128, k=784): naive=0.0258029 ms tiled=0.0300013 ms speedup=0.86x
+  layer2 (m=32, n=10, k=128):  naive=0.00519136 ms tiled=0.00620544 ms speedup=0.84x
+
+$ ./build/inference --batch 4096 --mode tiled --benchmark --benchmark-iters 50
+Matmul benchmark (avg of 50 iterations):
+  layer1 (m=4096, n=128, k=784): naive=1.27209 ms tiled=1.24982 ms speedup=1.02x
+  layer2 (m=4096, n=10, k=128):  naive=0.0344211 ms tiled=0.0284256 ms speedup=1.21x
+```
+
+At small batch sizes the naive kernel is actually slightly faster, since the weight
+matrices fit in L2 cache and the tiled kernel's `__syncthreads()` overhead isn't repaid.
+The tiled kernel pulls ahead at larger batch sizes once the working set outgrows the
+cache. See [Kernel design notes](docs/kernel_design.md#naive-vs-tiled-performance-crossover)
+for details.
+
 ## Binary Formats
 
 `models/weights.bin`:
@@ -176,7 +252,7 @@ This project demonstrates the core mechanics behind production inference systems
 - numerically stable output normalization
 - CPU correctness checking against the GPU result
 
-The next natural extensions are per-channel weight quantization, Tensor Core paths using DP4A or WMMA-style APIs, Nsight Compute profiling screenshots, and a small GitHub Actions workflow for the CPU reference test.
+The next natural extensions are per-channel weight quantization, Tensor Core paths using DP4A or WMMA-style APIs, and Nsight Compute profiling screenshots.
 
 ## Further Reading
 
