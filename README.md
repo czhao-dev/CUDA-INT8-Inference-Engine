@@ -27,6 +27,9 @@ All intermediate tensors stay on the GPU during inference.
 
 ```text
 .
+├── .github/
+│   └── workflows/
+│       └── cpu-test.yml
 ├── CMakeLists.txt
 ├── Makefile
 ├── include/
@@ -48,7 +51,8 @@ All intermediate tensors stay on the GPU during inference.
 ├── scripts/
 │   └── generate_sample_data.py
 └── tests/
-    └── test_cpu_reference.cpp
+    ├── test_cpu_reference.cpp
+    └── test_gpu_kernels.cu
 ```
 
 ## Kernels Implemented
